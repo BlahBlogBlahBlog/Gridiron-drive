@@ -269,9 +269,11 @@ canvas.addEventListener("mousedown",e=>{
 canvas.addEventListener("mousemove",e=>{
  const m=mousePos(e);
  if(game.throwing){
-   game.dragX=m.x;game.dragY=m.y;
-   const drag=Math.hypot(m.x-game.qb.x,m.y-game.qb.y);
-   game.power=clamp(drag/220,0,1);
+   game.dragX=m.x;
+   game.dragY=m.y;
+   // The cursor is the target. Distance from QB determines available power.
+   const targetDistance=Math.hypot(m.x-game.qb.x,m.y-game.qb.y);
+   game.power=clamp(targetDistance/360,0,1);
    document.getElementById("power").style.width=(game.power*100)+"%";
  }
 });
@@ -280,18 +282,40 @@ canvas.addEventListener("mouseup",e=>{
  throwBall();
 });
 function throwBall(){
- // Retro Bowl style: you PULL the cursor away from the intended target.
- // The release direction is opposite the pull vector.
- const pullX=game.dragX-game.qb.x, pullY=game.dragY-game.qb.y;
- const len=Math.hypot(pullX,pullY)||1;
- const p=Math.max(.15,game.power);
- const dirX=-pullX/len, dirY=-pullY/len;
+ // Direct aiming: release where you want the ball to go.
+ // Horizontal mouse movement aims the throw. Vertical mouse position
+ // changes the trajectory from a flatter bullet to a higher arc.
+ const targetX=game.dragX, targetY=game.dragY;
+ const dx=targetX-game.qb.x, dy=targetY-game.qb.y;
+ const distance=Math.max(1,Math.hypot(dx,dy));
+ const p=Math.max(.18,game.power);
+
+ // Pulling the target farther away gives more power, while the
+ // target itself remains the actual destination.
+ const speed=7+p*9;
+
+ // Arc is based on how high/low the target is relative to the QB.
+ // A target near the QB's horizontal level can still be a lob if
+ // the player aims high; lower aim produces a flatter pass.
+ const verticalAim=(targetY-game.qb.y)/Math.max(80,distance);
+ const arc=clamp(-verticalAim, -0.55, 0.85);
+
+ const dirX=dx/distance;
+ const baseVy=(dy/distance)*speed;
+
  game.ball={
-   x:game.qb.x,y:game.qb.y,
-   vx:dirX*(5+p*10),vy:dirY*(5+p*10),
-   life:0,max:28+p*52
+   x:game.qb.x,
+   y:game.qb.y,
+   vx:dirX*speed,
+   vy:baseVy,
+   gravity:0.075 + (0.11*(1-arc)),
+   arc:arc,
+   life:0,
+   max:Math.max(28, distance/(speed)*1.45)
  };
- msg("🏈 THROW! Power "+Math.round(p*100)+"%.");
+
+ msg("🏈 THROW! Aim "+Math.round(targetX)+" / "+Math.round(targetY)+
+     " • "+(arc>.3?"LOB":arc<-.15?"LOW":"STRAIGHT")+" • Power "+Math.round(p*100)+"%.");
 }
 function update(){
  if(game.active){
@@ -314,20 +338,100 @@ function moveReceivers(){
 function nearestTarget(){
  return game.players[game.selected]||game.players[0];
 }
+function getBallCarrier(){
+ if(!game.active) return game.qb;
+ if(game.ball) return game.ball;
+ if(game.option==="rb" && game.rb) return game.rb;
+ if(game.option==="fb" && game.fb) return game.fb;
+ return game.qb;
+}
+
 function moveDefense(){
- game.defenders.forEach(d=>{
-   let target=game.qb;
-   if(game.ball)target=game.ball;
-   else if(d.role==="cover"&&game.players.length)target=game.players[Math.min(d.index||0,game.players.length-1)];
-   const dx=target.x-d.x,dy=target.y-d.y,dist=Math.hypot(dx,dy)||1;
-   d.x+=dx/dist*d.speed;d.y+=dy/dist*d.speed;
-   if(!game.ball&&d.role==="rush"&&Math.hypot(d.x-game.qb.x,d.y-game.qb.y)<18){
-     if(game.passProtect&&Math.random()<.45){d.x-=25}
-     else endPlay(-rand(4,9),"💥 SACK!");
+ const carrier=getBallCarrier();
+
+ game.defenders.forEach((d,index)=>{
+   let target=carrier;
+   let speed=d.speed;
+
+   // On option plays, defenders have responsibilities:
+   // one defender attacks the QB/mesh, one protects pitch/edge,
+   // and the rest pursue the actual ball carrier.
+   if(game.play && game.play[1]==="option" && !game.ball){
+     if(index===0){
+       // Read/mesh defender: attacks the QB first.
+       target=game.qb;
+       speed=1.15;
+     }else if(index===1 && game.rb){
+       // Pitch defender: stays outside and mirrors RB.
+       target=game.rb;
+       speed=1.22;
+     }else{
+       target=carrier;
+       speed=1.05 + (index%3)*0.08;
+     }
+   }else if(game.ball){
+     // While the pass is airborne, defenders attack the ball.
+     target=game.ball;
+     speed=1.15 + (index%3)*0.08;
+   }else if(d.role==="cover" && game.players.length){
+     // Coverage players defend the closest useful receiver until
+     // the ball carrier becomes established.
+     let best=game.players[0],bestDist=Infinity;
+     game.players.forEach(r=>{
+       const dd=Math.hypot(r.x-d.x,r.y-d.y);
+       if(dd<bestDist){best=r;bestDist=dd;}
+     });
+     target=best;
+     speed=.82;
+   }else{
+     target=carrier;
+     speed=1.0;
    }
-   if(game.rb&&game.runnerControl&&Math.hypot(d.x-game.rb.x,d.y-game.rb.y)<18)endRunnerPlay();
+
+   const dx=target.x-d.x,dy=target.y-d.y,dist=Math.hypot(dx,dy)||1;
+   if(dist>4){
+     d.x+=dx/dist*speed;
+     d.y+=dy/dist*speed;
+   }
+
+   // Defenders tighten pursuit when a runner gets into open space.
+   if(!game.ball && carrier===getBallCarrier()){
+     const pursuit=Math.hypot(carrier.x-d.x,carrier.y-d.y);
+     if(pursuit<150){
+       d.x+=dx/dist*.45;
+       d.y+=dy/dist*.45;
+     }
+   }
+
+   // Sack the QB.
+   if(!game.ball && carrier===game.qb &&
+      Math.hypot(d.x-game.qb.x,d.y-game.qb.y)<18){
+     if(game.passProtect && Math.random()<.65){
+       d.x-=18;
+     }else{
+       endPlay(-rand(4,9),"💥 SACK!");
+       return;
+     }
+   }
+
+   // Tackle the current ball carrier.
+   if(!game.ball && carrier &&
+      Math.hypot(d.x-carrier.x,d.y-carrier.y)<17){
+     endRunnerPlay();
+     return;
+   }
+
+   // Defenders can break up a catch / intercept an airborne ball.
+   if(game.ball && Math.hypot(d.x-game.ball.x,d.y-game.ball.y)<15){
+     if(Math.random()<.40){
+       game.stats.int++;
+       endPlay(0,"🚨 INTERCEPTION!");
+       return;
+     }
+   }
  });
 }
+
 function updateRun(){
  if(!game.active)return;
  let runner=null;
@@ -379,13 +483,32 @@ canvas.addEventListener("click",e=>{
 });
 function optionChoose(which){
  game.option=which;
- if(which==="qb"){game.rb=null;game.fb=null;game.runnerControl=true;msg("QB KEEP! Use WASD to attack the edge.");}
- if(which==="rb"){game.qb.x-=10;game.runnerControl=true;msg("PITCH/GIVE TO RB! Use WASD to find the lane.");}
- if(which==="fb"){game.rb=null;game.runnerControl=true;msg("FULLBACK KEEP! Use WASD and hit the hole.");}
+ game.runnerControl=true;
+
+ // Once the decision is made, the defense immediately reassigns
+ // pursuit toward the player who actually has the ball.
+ if(which==="qb"){
+   game.rb=null;
+   game.fb=null;
+   game.qb.x-=8;
+   msg("QB KEEP! The defense is now keying the QB. Use WASD to attack the edge.");
+ }
+ if(which==="rb"){
+   game.qb.x-=12;
+   msg("PITCH TO RB! The defense is pursuing the RB. Use WASD to find the lane.");
+ }
+ if(which==="fb"){
+   game.rb=null;
+   game.qb.x-=8;
+   msg("GIVE TO FB! The defense is collapsing on the fullback. Use WASD to hit the hole.");
+ }
 }
 function updateBall(){
  if(!game.ball)return;
- game.ball.x+=game.ball.vx;game.ball.y+=game.ball.vy;game.ball.life++;
+ game.ball.x+=game.ball.vx;
+ game.ball.y+=game.ball.vy;
+ game.ball.vy+=game.ball.gravity;
+ game.ball.life++;
  for(let i=0;i<game.players.length;i++){
    const r=game.players[i];
    if(Math.hypot(r.x-game.ball.x,r.y-game.ball.y)<22){
@@ -409,8 +532,10 @@ function dropChance(){
  return clamp((100-acc)/500,.04,.16);
 }
 function endRunnerPlay(){
- const runner=game.option==="rb"?game.rb:game.option==="fb"?game.fb:game.rb;
- const x=runner?runner.x:game.qb.x;
+ let runner=game.qb;
+ if(game.option==="rb" && game.rb) runner=game.rb;
+ if(game.option==="fb" && game.fb) runner=game.fb;
+ const x=runner.x;
  const yards=Math.floor((x-game.yard*SCALE)/SCALE);
  endPlay(yards,"TACKLED!");
 }
@@ -496,7 +621,10 @@ function draw(){
  if(game.team){for(const p of game.players)circle(p.x,p.y,11,game.team.color);if(game.rb)circle(game.rb.x,game.rb.y,11,game.team.color);if(game.fb)circle(game.fb.x,game.fb.y,11,game.team.color);circle(game.qb.x,game.qb.y,12,"#fff")}
  for(const d of game.defenders)circle(d.x,d.y,11,"#e64646");
  if(game.ball)circle(game.ball.x,game.ball.y,6,"#8b4513");
- if(game.throwing){ctx.strokeStyle="rgba(255,255,255,.8)";ctx.lineWidth=3;ctx.setLineDash([8,7]);ctx.beginPath();ctx.moveTo(game.qb.x,game.qb.y);ctx.lineTo(game.dragX,game.dragY);ctx.stroke();ctx.setLineDash([]);circle(game.dragX,game.dragY,12,"transparent");}
+ if(game.throwing){
+   ctx.fillStyle="rgba(255,255,255,.16)";
+   ctx.beginPath();ctx.arc(game.dragX,game.dragY,20,0,Math.PI*2);ctx.fill();
+   ctx.strokeStyle="rgba(255,255,255,.8)";ctx.lineWidth=3;ctx.setLineDash([8,7]);ctx.beginPath();ctx.moveTo(game.qb.x,game.qb.y);ctx.lineTo(game.dragX,game.dragY);ctx.stroke();ctx.setLineDash([]);circle(game.dragX,game.dragY,12,"transparent");}
 }
 function circle(x,y,r,c){ctx.fillStyle=c;if(c!=="transparent"){ctx.beginPath();ctx.arc(x,y,r,0,Math.PI*2);ctx.fill()}else{ctx.strokeStyle="#fff";ctx.beginPath();ctx.arc(x,y,r,0,Math.PI*2);ctx.stroke()}}
 buildTeamCards();buildFormationButtons();buildPlayButtons();updateUI();update();
