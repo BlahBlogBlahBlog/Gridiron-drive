@@ -1,0 +1,1099 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Gridiron Drive</title>
+
+<style>
+    * {
+        box-sizing: border-box;
+    }
+
+    body {
+        margin: 0;
+        background: #101820;
+        color: white;
+        font-family: Arial, Helvetica, sans-serif;
+    }
+
+    .game {
+        max-width: 1100px;
+        margin: auto;
+        padding: 15px;
+    }
+
+    h1 {
+        text-align: center;
+        margin: 5px 0 15px;
+    }
+
+    .scoreboard {
+        background: #151515;
+        border: 2px solid #555;
+        border-radius: 10px;
+        padding: 12px;
+        display: grid;
+        grid-template-columns: repeat(6, 1fr);
+        gap: 8px;
+        text-align: center;
+    }
+
+    .stat {
+        background: #242424;
+        padding: 8px;
+        border-radius: 6px;
+    }
+
+    .label {
+        font-size: 12px;
+        color: #aaa;
+    }
+
+    .value {
+        font-size: 22px;
+        font-weight: bold;
+    }
+
+    #field {
+        width: 100%;
+        max-width: 1000px;
+        height: 420px;
+        display: block;
+        margin: 15px auto;
+        border: 4px solid white;
+        border-radius: 8px;
+        background: #18733b;
+    }
+
+    .controls {
+        background: #1d1d1d;
+        padding: 15px;
+        border-radius: 10px;
+        margin-top: 10px;
+    }
+
+    .controls h2 {
+        margin-top: 0;
+    }
+
+    .plays {
+        display: grid;
+        grid-template-columns: repeat(5, 1fr);
+        gap: 8px;
+    }
+
+    button {
+        padding: 14px 8px;
+        border: none;
+        border-radius: 7px;
+        background: #246bfd;
+        color: white;
+        font-weight: bold;
+        cursor: pointer;
+        font-size: 14px;
+    }
+
+    button:hover {
+        background: #4d88ff;
+    }
+
+    button:disabled {
+        background: #555;
+        cursor: not-allowed;
+    }
+
+    #message {
+        margin-top: 15px;
+        min-height: 55px;
+        padding: 12px;
+        background: #292929;
+        border-radius: 7px;
+        font-size: 18px;
+        line-height: 1.4;
+    }
+
+    .reset {
+        background: #c62828;
+        margin-top: 10px;
+    }
+
+    .reset:hover {
+        background: #e53935;
+    }
+
+    .instructions {
+        color: #bbb;
+        font-size: 14px;
+        margin-top: 12px;
+    }
+
+    @media(max-width: 700px) {
+        .scoreboard {
+            grid-template-columns: repeat(3, 1fr);
+        }
+
+        .plays {
+            grid-template-columns: repeat(2, 1fr);
+        }
+
+        #field {
+            height: 300px;
+        }
+    }
+</style>
+</head>
+
+<body>
+
+<div class="game">
+
+    <h1>🏈 GRIDIRON DRIVE</h1>
+
+    <div class="scoreboard">
+
+        <div class="stat">
+            <div class="label">YOU</div>
+            <div class="value" id="userScore">0</div>
+        </div>
+
+        <div class="stat">
+            <div class="label">CPU</div>
+            <div class="value" id="cpuScore">0</div>
+        </div>
+
+        <div class="stat">
+            <div class="label">QUARTER</div>
+            <div class="value" id="quarter">1</div>
+        </div>
+
+        <div class="stat">
+            <div class="label">TIME</div>
+            <div class="value" id="clock">5:00</div>
+        </div>
+
+        <div class="stat">
+            <div class="label">DOWN</div>
+            <div class="value" id="down">1</div>
+        </div>
+
+        <div class="stat">
+            <div class="label">TO GO</div>
+            <div class="value" id="distance">10</div>
+        </div>
+
+    </div>
+
+    <canvas id="field" width="1000" height="420"></canvas>
+
+    <div class="controls">
+
+        <h2>Choose Your Play</h2>
+
+        <div class="plays">
+
+            <button onclick="runPlay('run')">
+                🏃 Inside Run
+            </button>
+
+            <button onclick="runPlay('outside')">
+                🏃 Outside Run
+            </button>
+
+            <button onclick="runPlay('quick')">
+                🎯 Quick Pass
+            </button>
+
+            <button onclick="runPlay('deep')">
+                🚀 Deep Pass
+            </button>
+
+            <button onclick="runPlay('screen')">
+                🏈 Screen
+            </button>
+
+        </div>
+
+        <div id="message">
+            Pick a play to start the drive.
+        </div>
+
+        <div class="instructions">
+            Passing plays use an automatic accuracy/timing simulation.
+            The defense is controlled by the computer.
+        </div>
+
+        <button class="reset" onclick="resetGame()">
+            Restart Game
+        </button>
+
+    </div>
+
+</div>
+
+<script>
+
+const canvas = document.getElementById("field");
+const ctx = canvas.getContext("2d");
+
+let game = {
+    userScore: 0,
+    cpuScore: 0,
+
+    quarter: 1,
+    seconds: 300,
+
+    down: 1,
+    distance: 10,
+
+    ballYard: 25,
+
+    possession: "user",
+
+    totalPlays: 0,
+    passingYards: 0,
+    rushingYards: 0,
+
+    gameOver: false
+};
+
+
+/* =========================
+   FIELD
+========================= */
+
+function drawField() {
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // Field
+    ctx.fillStyle = "#18733b";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // Yard lines
+    ctx.strokeStyle = "rgba(255,255,255,.7)";
+    ctx.lineWidth = 2;
+
+    for(let yard = 0; yard <= 100; yard += 10) {
+
+        let x = yard * 10;
+
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, canvas.height);
+        ctx.stroke();
+
+        if(yard > 0 && yard < 100) {
+
+            ctx.fillStyle = "white";
+            ctx.font = "20px Arial";
+            ctx.textAlign = "center";
+
+            ctx.fillText(
+                yard <= 50 ? yard : 100 - yard,
+                x,
+                35
+            );
+
+            ctx.fillText(
+                yard <= 50 ? yard : 100 - yard,
+                x,
+                canvas.height - 20
+            );
+        }
+    }
+
+    // End zones
+    ctx.fillStyle = "rgba(0,0,100,.35)";
+    ctx.fillRect(0, 0, 100, canvas.height);
+
+    ctx.fillStyle = "rgba(100,0,0,.35)";
+    ctx.fillRect(900, 0, 100, canvas.height);
+
+    // Ball position
+    let ballX = game.ballYard * 10;
+
+    ctx.fillStyle = "#ffcc00";
+    ctx.beginPath();
+    ctx.arc(ballX, canvas.height / 2, 10, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Line of scrimmage
+    ctx.strokeStyle = "#00bfff";
+    ctx.lineWidth = 4;
+
+    ctx.beginPath();
+    ctx.moveTo(ballX, 0);
+    ctx.lineTo(ballX, canvas.height);
+    ctx.stroke();
+
+    // First down marker
+    let firstDown = Math.min(
+        100,
+        game.ballYard + game.distance
+    );
+
+    let firstX = firstDown * 10;
+
+    ctx.strokeStyle = "#ffff00";
+    ctx.lineWidth = 3;
+
+    ctx.beginPath();
+    ctx.moveTo(firstX, 0);
+    ctx.lineTo(firstX, canvas.height);
+    ctx.stroke();
+
+    // Players
+    drawOffense(ballX);
+    drawDefense(ballX);
+}
+
+
+function drawOffense(ballX) {
+
+    const positions = [
+
+        [-35, -80],
+        [-25, -30],
+        [-25, 30],
+        [-35, 80],
+        [0, -110],
+        [0, 110]
+
+    ];
+
+    ctx.fillStyle = "#2994ff";
+
+    positions.forEach(pos => {
+
+        ctx.beginPath();
+
+        ctx.arc(
+            ballX + pos[0],
+            canvas.height / 2 + pos[1],
+            9,
+            0,
+            Math.PI * 2
+        );
+
+        ctx.fill();
+    });
+
+    // QB
+    ctx.fillStyle = "#ffffff";
+
+    ctx.beginPath();
+
+    ctx.arc(
+        ballX - 65,
+        canvas.height / 2,
+        9,
+        0,
+        Math.PI * 2
+    );
+
+    ctx.fill();
+}
+
+
+function drawDefense(ballX) {
+
+    let defenseX = ballX + 45;
+
+    ctx.fillStyle = "#ff3333";
+
+    for(let i = -120; i <= 120; i += 40) {
+
+        ctx.beginPath();
+
+        ctx.arc(
+            defenseX + Math.random() * 10,
+            canvas.height / 2 + i,
+            9,
+            0,
+            Math.PI * 2
+        );
+
+        ctx.fill();
+    }
+}
+
+
+/* =========================
+   RANDOM HELPERS
+========================= */
+
+function random(min, max) {
+
+    return Math.floor(
+        Math.random() * (max - min + 1)
+    ) + min;
+}
+
+
+function chance(percent) {
+
+    return Math.random() * 100 < percent;
+}
+
+
+/* =========================
+   DEFENSE AI
+========================= */
+
+function chooseDefense(play) {
+
+    const defenses = [
+
+        "Cover 2",
+        "Cover 3",
+        "Man Coverage",
+        "Blitz",
+        "Run Commit"
+    ];
+
+    let defense;
+
+    if(play === "run") {
+
+        if(chance(35)) {
+            defense = "Run Commit";
+        } else {
+            defense = defenses[random(0,3)];
+        }
+
+    } else if(play === "deep") {
+
+        if(chance(30)) {
+            defense = "Blitz";
+        } else {
+            defense = chance(50)
+                ? "Cover 3"
+                : "Cover 2";
+        }
+
+    } else {
+
+        defense = defenses[
+            random(0,3)
+        ];
+    }
+
+    return defense;
+}
+
+
+/* =========================
+   PLAY ENGINE
+========================= */
+
+function runPlay(play) {
+
+    if(game.gameOver) return;
+
+    game.totalPlays++;
+
+    let defense = chooseDefense(play);
+
+    let result;
+
+    if(play === "run") {
+
+        result = simulateRun(defense);
+
+    } else if(play === "outside") {
+
+        result = simulateOutsideRun(defense);
+
+    } else if(play === "quick") {
+
+        result = simulateQuickPass(defense);
+
+    } else if(play === "deep") {
+
+        result = simulateDeepPass(defense);
+
+    } else if(play === "screen") {
+
+        result = simulateScreen(defense);
+    }
+
+    processPlay(result, defense);
+}
+
+
+/* =========================
+   RUN PLAYS
+========================= */
+
+function simulateRun(defense) {
+
+    let yards;
+
+    if(defense === "Run Commit") {
+
+        yards = random(-3, 3);
+
+    } else if(defense === "Blitz") {
+
+        yards = random(-2, 8);
+
+    } else {
+
+        yards = random(0, 7);
+    }
+
+    if(chance(5)) {
+
+        return {
+            yards: 0,
+            turnover: true,
+            text: "FUMBLE! The defense recovers."
+        };
+    }
+
+    return {
+        yards: yards,
+        turnover: false,
+        text:
+            yards >= 0
+            ? `Inside run gains ${yards} yards.`
+            : `The defense stuffs the run for ${yards} yards.`
+    };
+}
+
+
+function simulateOutsideRun(defense) {
+
+    let yards;
+
+    if(defense === "Run Commit") {
+
+        yards = random(-4, 2);
+
+    } else {
+
+        yards = random(-2, 10);
+    }
+
+    if(chance(3)) {
+
+        return {
+            yards: 0,
+            turnover: true,
+            text: "FUMBLE on the outside run!"
+        };
+    }
+
+    return {
+        yards: yards,
+        turnover: false,
+        text:
+            yards >= 0
+            ? `Outside run gains ${yards} yards.`
+            : `The defense gets penetration and loses ${Math.abs(yards)} yards.`
+    };
+}
+
+
+/* =========================
+   PASS PLAYS
+========================= */
+
+function simulateQuickPass(defense) {
+
+    if(defense === "Blitz" && chance(25)) {
+
+        return {
+            yards: -7,
+            turnover: false,
+            sack: true,
+            text: "BLITZ! The quarterback is sacked for 7 yards."
+        };
+    }
+
+    if(chance(7)) {
+
+        return {
+            yards: 0,
+            turnover: true,
+            interception: true,
+            text: "INTERCEPTION! The defense picks off the pass."
+        };
+    }
+
+    if(chance(12)) {
+
+        return {
+            yards: 0,
+            turnover: false,
+            incomplete: true,
+            text: "Incomplete pass."
+        };
+    }
+
+    let yards;
+
+    if(defense === "Cover 2") {
+
+        yards = random(3, 9);
+
+    } else {
+
+        yards = random(4, 13);
+    }
+
+    return {
+        yards: yards,
+        turnover: false,
+        text: `Quick pass complete for ${yards} yards.`
+    };
+}
+
+
+function simulateDeepPass(defense) {
+
+    if(defense === "Blitz" && chance(35)) {
+
+        return {
+            yards: -8,
+            turnover: false,
+            sack: true,
+            text: "The blitz gets home! Quarterback sacked for 8 yards."
+        };
+    }
+
+    if(chance(15)) {
+
+        return {
+            yards: 0,
+            turnover: true,
+            interception: true,
+            text: "INTERCEPTION! The deep ball is picked off."
+        };
+    }
+
+    if(chance(35)) {
+
+        return {
+            yards: 0,
+            turnover: false,
+            incomplete: true,
+            text: "The deep pass falls incomplete."
+        };
+    }
+
+    let yards;
+
+    if(defense === "Cover 3") {
+
+        yards = random(10, 28);
+
+    } else if(defense === "Man Coverage") {
+
+        yards = random(15, 40);
+
+    } else {
+
+        yards = random(8, 25);
+    }
+
+    return {
+        yards: yards,
+        turnover: false,
+        text: `DEEP BALL! Complete for ${yards} yards!`
+    };
+}
+
+
+function simulateScreen(defense) {
+
+    if(defense === "Blitz") {
+
+        return {
+            yards: random(8, 20),
+            turnover: false,
+            text: "The screen beats the blitz!"
+        };
+    }
+
+    if(defense === "Run Commit") {
+
+        return {
+            yards: random(-3, 4),
+            turnover: false,
+            text: "The defense sniffs out the screen."
+        };
+    }
+
+    return {
+        yards: random(1, 12),
+        turnover: false,
+        text: "Screen pass complete."
+    };
+}
+
+
+/* =========================
+   PROCESS PLAY
+========================= */
+
+function processPlay(result, defense) {
+
+    let message =
+        `Defense called ${defense}. ${result.text}`;
+
+    // Turnover
+    if(result.turnover) {
+
+        document.getElementById("message").innerText =
+            message;
+
+        changePossession();
+
+        updateDisplay();
+
+        return;
+    }
+
+    // Statistics
+    if(result.yards > 0) {
+
+        if(
+            result.text.includes("run")
+            ||
+            result.text.includes("Run")
+            ||
+            result.text.includes("Outside")
+        ) {
+
+            game.rushingYards += result.yards;
+
+        } else {
+
+            game.passingYards += result.yards;
+        }
+    }
+
+    game.ballYard += result.yards;
+
+    if(game.ballYard >= 100) {
+
+        touchdown();
+
+        return;
+    }
+
+    if(game.ballYard <= 0) {
+
+        game.ballYard = 1;
+    }
+
+    // First down
+    if(result.yards >= game.distance) {
+
+        game.down = 1;
+
+        game.distance = 10;
+
+        message += " FIRST DOWN!";
+
+    } else {
+
+        game.distance -= result.yards;
+
+        game.down++;
+    }
+
+    // Fourth down failure
+    if(game.down > 4) {
+
+        message += " Turnover on downs.";
+
+        changePossession();
+
+    }
+
+    // Clock
+    let secondsUsed = random(8, 25);
+
+    game.seconds -= secondsUsed;
+
+    if(game.seconds <= 0) {
+
+        nextQuarter();
+    }
+
+    document.getElementById("message").innerText =
+        message;
+
+    updateDisplay();
+    drawField();
+}
+
+
+/* =========================
+   TOUCHDOWN
+========================= */
+
+function touchdown() {
+
+    game.userScore += 7;
+
+    document.getElementById("message").innerText =
+        "🏆 TOUCHDOWN! You score 7 points!";
+
+    game.ballYard = 25;
+
+    game.down = 1;
+    game.distance = 10;
+
+    game.seconds -= 20;
+
+    if(game.seconds <= 0) {
+
+        nextQuarter();
+    }
+
+    updateDisplay();
+    drawField();
+}
+
+
+/* =========================
+   TURNOVER
+========================= */
+
+function changePossession() {
+
+    game.down = 1;
+    game.distance = 10;
+    game.ballYard = 25;
+
+    /*
+       Instead of playing the CPU offense,
+       we simulate its possession.
+    */
+
+    simulateCPUDrive();
+}
+
+
+function simulateCPUDrive() {
+
+    let drives = random(2, 5);
+
+    let cpuYards = 0;
+
+    for(let i = 0; i < drives; i++) {
+
+        cpuYards += random(2, 15);
+    }
+
+    if(cpuYards >= 45 && chance(30)) {
+
+        game.cpuScore += 7;
+
+        document.getElementById("message").innerText +=
+            " The CPU drives down the field and scores a touchdown.";
+
+    } else if(cpuYards >= 35 && chance(25)) {
+
+        game.cpuScore += 3;
+
+        document.getElementById("message").innerText +=
+            " The CPU drives into field-goal range and kicks a field goal.";
+
+    } else {
+
+        document.getElementById("message").innerText +=
+            " The CPU possession ends without points.";
+    }
+
+    game.ballYard = 25;
+    game.down = 1;
+    game.distance = 10;
+
+    game.seconds -= random(20, 50);
+
+    if(game.seconds <= 0) {
+
+        nextQuarter();
+    }
+
+    updateDisplay();
+    drawField();
+}
+
+
+/* =========================
+   QUARTER
+========================= */
+
+function nextQuarter() {
+
+    game.quarter++;
+
+    if(game.quarter > 4) {
+
+        endGame();
+
+        return;
+    }
+
+    game.seconds = 300;
+
+    game.down = 1;
+    game.distance = 10;
+    game.ballYard = 25;
+
+    document.getElementById("message").innerText =
+        `Quarter ${game.quarter} begins.`;
+}
+
+
+/* =========================
+   END GAME
+========================= */
+
+function endGame() {
+
+    game.gameOver = true;
+
+    let result;
+
+    if(game.userScore > game.cpuScore) {
+
+        result =
+            `🏆 YOU WIN ${game.userScore}-${game.cpuScore}!`;
+
+    } else if(game.userScore < game.cpuScore) {
+
+        result =
+            `The CPU wins ${game.cpuScore}-${game.userScore}.`;
+
+    } else {
+
+        result =
+            `The game ends in a ${game.userScore}-${game.cpuScore} tie.`;
+    }
+
+    document.getElementById("message").innerText =
+        result +
+        " Press Restart Game to play again.";
+
+    updateDisplay();
+}
+
+
+/* =========================
+   DISPLAY
+========================= */
+
+function updateDisplay() {
+
+    document.getElementById("userScore").innerText =
+        game.userScore;
+
+    document.getElementById("cpuScore").innerText =
+        game.cpuScore;
+
+    document.getElementById("quarter").innerText =
+        game.quarter;
+
+    let minutes =
+        Math.floor(game.seconds / 60);
+
+    let seconds =
+        game.seconds % 60;
+
+    document.getElementById("clock").innerText =
+        `${minutes}:${seconds.toString().padStart(2,"0")}`;
+
+    document.getElementById("down").innerText =
+        game.down;
+
+    document.getElementById("distance").innerText =
+        game.distance;
+}
+
+
+/* =========================
+   RESET
+========================= */
+
+function resetGame() {
+
+    game = {
+
+        userScore: 0,
+        cpuScore: 0,
+
+        quarter: 1,
+        seconds: 300,
+
+        down: 1,
+        distance: 10,
+
+        ballYard: 25,
+
+        possession: "user",
+
+        totalPlays: 0,
+        passingYards: 0,
+        rushingYards: 0,
+
+        gameOver: false
+    };
+
+    document.getElementById("message").innerText =
+        "Pick a play to start the drive.";
+
+    updateDisplay();
+    drawField();
+}
+
+
+/* =========================
+   KEYBOARD CONTROLS
+========================= */
+
+document.addEventListener("keydown", function(event) {
+
+    if(game.gameOver) return;
+
+    switch(event.key.toLowerCase()) {
+
+        case "1":
+            runPlay("run");
+            break;
+
+        case "2":
+            runPlay("outside");
+            break;
+
+        case "3":
+            runPlay("quick");
+            break;
+
+        case "4":
+            runPlay("deep");
+            break;
+
+        case "5":
+            runPlay("screen");
+            break;
+    }
+
+});
+
+
+/* INITIALIZE */
+
+updateDisplay();
+drawField();
+
+</script>
+
+</body>
+</html>
